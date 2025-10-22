@@ -6,11 +6,14 @@ let usedChips = {
     tripleCaptain: false,
     wildcard: false
 };
+let isEditMode = false;
 
 document.addEventListener('DOMContentLoaded', () => {
     loadAllPlayers();
     // The 'Analyze Squad' button listener is now the primary action
     document.getElementById('analyze-button').addEventListener('click', analyzeTeam);
+    // New listener for the Edit/Save button
+    document.getElementById('edit-save-button').addEventListener('click', toggleEditMode);
     
     setupChipEventListeners();
 
@@ -21,6 +24,24 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 });
+
+function toggleEditMode() {
+    isEditMode = !isEditMode;
+    const button = document.getElementById('edit-save-button');
+    if (isEditMode) {
+        button.textContent = 'Save Team';
+        button.classList.remove('btn-secondary');
+        button.classList.add('btn-success');
+    } else {
+        button.textContent = 'Edit Team';
+        button.classList.remove('btn-success');
+        button.classList.add('btn-secondary');
+        // When saving, we also save the current starter/bench state
+        saveSquadToStorage(); 
+    }
+    initializePitchView();
+    validateLineup();
+}
 
 function setupChipEventListeners() {
     document.getElementById('bench-boost-used').addEventListener('change', (e) => {
@@ -82,7 +103,15 @@ function createPlayerImageHTML(player, size = 'sm') {
 }
 
 function saveSquadToStorage() {
-    localStorage.setItem('fpl_squad', JSON.stringify(selectedSquadIds));
+    const starters = document.querySelectorAll('.pitch-player:not(.benched):not(.empty-slot)');
+    const starterIds = Array.from(starters).map(el => parseInt(el.dataset.playerId));
+
+    const squadState = {
+        allIds: selectedSquadIds,
+        starterIds: isEditMode ? [] : starterIds // Only save starters if not in edit mode
+    };
+
+    localStorage.setItem('fpl_squad_state', JSON.stringify(squadState));
 }
 
 function saveChipStatusToStorage() {
@@ -90,20 +119,23 @@ function saveChipStatusToStorage() {
 }
 
 function loadSquadFromStorage() {
-    const savedSquadIds = JSON.parse(localStorage.getItem('fpl_squad') || '[]');
-    if (savedSquadIds.length > 0) {
+    const savedState = JSON.parse(localStorage.getItem('fpl_squad_state') || '{}');
+    if (savedState.allIds && savedState.allIds.length > 0) {
         console.log("Loading saved squad from localStorage.");
         const allPlayersFlat = [].concat(...Object.values(allPlayersData.players));
 
-        savedSquadIds.forEach(playerId => {
+        // Load all player IDs into the main list
+        savedState.allIds.forEach(playerId => {
             const player = allPlayersFlat.find(p => p.id === playerId);
             if (player) {
-                // Just populate the ID array. initializePitchView will handle rendering.
                 if (!selectedSquadIds.includes(player.id)) {
                     selectedSquadIds.push(player.id);
                 }
             }
         });
+
+        // If we have saved starters, we can apply them. This happens in initializePitchView now.
+        // The presence of savedState.starterIds will inform the initial render.
     }
 }
 
@@ -116,12 +148,21 @@ function loadChipStatusFromStorage() {
     document.getElementById('triple-captain-used').checked = usedChips.tripleCaptain;
     document.getElementById('wildcard-used').checked = usedChips.wildcard;
 }
+
 function initializePitchView() {
-    // Define the initial layout of empty slots
-    const layout = {
-        'gkp-area': 1, 'def-area': 4, 'mid-area': 4, 'fwd-area': 2, // 11 starters
-        'bench-area': 4 // 4 subs
-    };
+    const savedState = JSON.parse(localStorage.getItem('fpl_squad_state') || '{}');
+    let layout;
+
+    if (isEditMode) {
+        // In Edit Mode, show max slots for flexibility
+        layout = {
+            'gkp-area': 2, 'def-area': 5, 'mid-area': 5, 'fwd-area': 3,
+            'bench-area': 4
+        };
+    } else {
+        // In View Mode, show a standard 4-4-2 layout for empty slots
+        layout = { 'gkp-area': 1, 'def-area': 4, 'mid-area': 4, 'fwd-area': 2, 'bench-area': 4 };
+    }
 
     // 1. Clear all pitch and bench areas first
     for (const areaId in layout) {
@@ -140,29 +181,27 @@ function initializePitchView() {
             return { ...player, position: parseInt(position), team_code: teamData ? teamData.code : null };
         }).filter(Boolean); // Filter out any nulls if a player wasn't found
     }
-    
-    // Default starting XI formation (1-4-4-2)
-    const starters = new Set();
-    const posCounts = { 1: 0, 2: 0, 3: 0, 4: 0 };
-    const starterLimits = { 1: 1, 2: 4, 3: 4, 4: 2 }; // Corrected default formation limits
-    
-    // Sort players by position to apply default starters (e.g., GKP first, then DEF, etc.)
-    selectedPlayers.sort((a, b) => a.position - b.position);
 
     // Keep track of how many players are actually placed in each area
     const placedPlayersCount = {
         'gkp-area': 0, 'def-area': 0, 'mid-area': 0, 'fwd-area': 0, 'bench-area': 0
     };
+    
+    // Determine starters
+    let starterIds = new Set();
+    if (!isEditMode && savedState.starterIds && savedState.starterIds.length === 11) {
+        // If in View mode and we have saved starters, use them
+        starterIds = new Set(savedState.starterIds);
+    } else {
+        // In Edit mode, or if no saved starters, all players are initially placed on the pitch by position
+        // until the pitch is full (11 players), then they go to the bench.
+        const pitchPlayers = selectedPlayers.slice(0, 11);
+        starterIds = new Set(pitchPlayers.map(p => p.id));
+    }
 
     // 2. Place actual players first
     selectedPlayers.forEach(player => {
-        let isStarter = false;
-        // Try to assign as starter if position limit not reached
-        if (posCounts[player.position] < starterLimits[player.position]) {
-            starters.add(player.id);
-            posCounts[player.position]++;
-            isStarter = true;
-        }
+        const isStarter = starterIds.has(player.id);
 
         const playerEl = createPitchPlayerElement(player, isStarter);
         let areaId;
@@ -182,11 +221,18 @@ function initializePitchView() {
         const emptySlotsToAdd = layout[areaId] - playersInArea;
 
         for (let i = 0; i < emptySlotsToAdd; i++) {
-            area.appendChild(createEmptySlot());
+            // Determine position ID from areaId for filtering
+            let positionIdForFilter;
+            if (areaId === 'gkp-area') positionIdForFilter = 1;
+            else if (areaId === 'def-area') positionIdForFilter = 2;
+            else if (areaId === 'mid-area') positionIdForFilter = 3;
+            else if (areaId === 'fwd-area') positionIdForFilter = 4;
+            else if (areaId === 'bench-area') positionIdForFilter = 0; // Use 0 for bench, meaning 'all' for browser filter
+            area.appendChild(createEmptySlot(positionIdForFilter)); // Pass positionIdForFilter
         }
     }
     // --- Captaincy Logic ---
-    const starterIds = Array.from(starters);
+    const currentStarterIds = Array.from(starterIds);
     let savedCaptainId = localStorage.getItem('fpl_captain');
     let savedViceCaptainId = localStorage.getItem('fpl_vice_captain');
 
@@ -199,15 +245,14 @@ function initializePitchView() {
     }
 
     // If no captain is saved or the saved one is not in the squad, set a default
-    if (!savedCaptainId && starterIds.length > 0) {
-        savedCaptainId = starterIds[0];
+    if (!savedCaptainId && currentStarterIds.length > 0) {
+        savedCaptainId = currentStarterIds[0];
         localStorage.setItem('fpl_captain', savedCaptainId);
     }
 
     // If no vice-captain is saved or the saved one is not in the squad, set a default
-    if (!savedViceCaptainId && starterIds.length > 1) {
-        // Ensure vice-captain is not the same as captain
-        savedViceCaptainId = starterIds[1] == savedCaptainId ? (starterIds[2] || null) : starterIds[1];
+    if (!savedViceCaptainId && currentStarterIds.length > 1) {
+        savedViceCaptainId = currentStarterIds[1] == savedCaptainId ? (currentStarterIds[2] || null) : currentStarterIds[1];
         if (savedViceCaptainId) localStorage.setItem('fpl_vice_captain', savedViceCaptainId);
     }
 
@@ -228,9 +273,12 @@ function initializePitchView() {
     document.getElementById('player-browser-price-filter').addEventListener('input', filterPlayerBrowser);
 } 
 
-function createEmptySlot() {
+function createEmptySlot(positionId = null) { // Accept positionId
     const emptySlotTemplate = document.getElementById('empty-slot-template');
     const emptySlot = emptySlotTemplate.content.cloneNode(true).firstElementChild;
+    if (positionId !== null) {
+        emptySlot.dataset.position = positionId; // Set dataset.position
+    }
     emptySlot.addEventListener('click', () => highlightEmptySlot(emptySlot));
     return emptySlot;
 }
@@ -238,7 +286,7 @@ function createEmptySlot() {
 
 function createPitchPlayerElement(player, isStarter) {
     const playerDiv = document.createElement('div');
-    playerDiv.className = `pitch-player ${isStarter ? '' : 'benched'}`;
+    playerDiv.className = `pitch-player ${isStarter ? '' : 'benched'} ${isEditMode ? '' : 'locked'}`;
     playerDiv.id = `pitch-player-${player.id}`;
     playerDiv.dataset.playerId = player.id;
     playerDiv.dataset.position = player.position;
@@ -247,10 +295,10 @@ function createPitchPlayerElement(player, isStarter) {
 
     playerDiv.innerHTML = `
         <div class="player-kit">
-            <div class="remove-player-btn"><i class="fas fa-times"></i></div>
+            <div class="remove-player-btn">&times;</div>
             <img src="${shirtUrl}" class="player-shirt" alt="${player.team} shirt" onerror="this.style.display='none'">
-            <span class="player-action-button remove-from-pitch-btn" title="Move to Bench">&times;</span>
-            <span class="player-action-button add-to-pitch-btn" title="Move to Pitch">+</span>
+            <span class="player-action-button remove-from-pitch-btn" title="Move to Bench"><i class="fas fa-arrow-down"></i></span>
+            <span class="player-action-button add-to-pitch-btn" title="Move to Pitch"><i class="fas fa-arrow-up"></i></span>
             <img src="${player.face_url}" class="player-face-overlay" alt="${player.name}" onerror="this.onerror=null;this.src='https://upload.wikimedia.org/wikipedia/commons/8/89/Portrait_Placeholder.png';">
             <div class="captaincy-badge" style="display: none;"></div>
         </div>
@@ -265,38 +313,52 @@ function createPitchPlayerElement(player, isStarter) {
         </div>
     `;
 
-    playerDiv.querySelector('.remove-player-btn').addEventListener('click', () => removePlayerFromTeam(player.id));
-    playerDiv.querySelector('.remove-from-pitch-btn').addEventListener('click', () => movePlayerToBench(player.id));
-    playerDiv.querySelector('.add-to-pitch-btn').addEventListener('click', () => movePlayerToPitch(player.id));
+    if (isEditMode) {
+        playerDiv.querySelector('.remove-player-btn').addEventListener('click', () => removePlayerFromTeam(player.id));
+        playerDiv.querySelector('.remove-from-pitch-btn').addEventListener('click', () => movePlayerToBench(player.id));
+        playerDiv.querySelector('.add-to-pitch-btn').addEventListener('click', () => movePlayerToPitch(player.id));
+    }
 
     return playerDiv;
-}
-
-function placePlayerElement(playerEl, position, isStarter) {
-    let areaId;
-    if (isStarter) {
-        areaId = { 1: 'gkp-area', 2: 'def-area', 3: 'mid-area', 4: 'fwd-area' }[position];
-    } else {
-        areaId = 'bench-area';
-    }
-    document.getElementById(areaId).appendChild(playerEl);
 }
 
 function movePlayerToBench(playerId) {
     const playerEl = document.getElementById(`pitch-player-${playerId}`);
     if (playerEl) {
+        const currentParent = playerEl.parentNode; // This will be 'gkp-area', 'def-area', etc.
+        const positionId = playerEl.dataset.position;
+
         playerEl.classList.add('benched');
         document.getElementById('bench-area').appendChild(playerEl);
-        validateLineup();
+
+        // Create an empty slot in the area the player just left
+        const emptySlot = createEmptySlot(positionId);
+        currentParent.appendChild(emptySlot);
+        validateLineup(true); // Pass true to indicate it's an edit action
     }
 }
 
 function movePlayerToPitch(playerId) {
     const playerEl = document.getElementById(`pitch-player-${playerId}`);
     if (playerEl) {
-        placePlayerElement(playerEl, playerEl.dataset.position, true);
-        playerEl.classList.remove('benched');
-        validateLineup();
+        const position = playerEl.dataset.position;
+        const targetAreaId = { 1: 'gkp-area', 2: 'def-area', 3: 'mid-area', 4: 'fwd-area' }[position];
+        const targetArea = document.getElementById(targetAreaId);
+        
+        // Find an empty slot. First, look in the player's correct position area.
+        // If none is found, look for ANY empty slot on the entire pitch.
+        let emptySlot = targetArea.querySelector('.empty-slot');
+        if (!emptySlot) {
+            emptySlot = document.querySelector('#gkp-area .empty-slot, #def-area .empty-slot, #mid-area .empty-slot, #fwd-area .empty-slot');
+        }
+
+        if (emptySlot) {
+            emptySlot.parentNode.replaceChild(playerEl, emptySlot);
+            playerEl.classList.remove('benched');
+            validateLineup(true); // Pass true to indicate it's an edit action
+        } else {
+            alert(`No empty slots available on the pitch. Please move another player to the bench first.`);
+        }
     }
 }
 
@@ -317,27 +379,40 @@ function removePlayerFromTeam(playerId) {
     // Refresh the browser to re-enable the removed player
     filterPlayerBrowser();
     saveSquadToStorage();
-    validateLineup();
+    validateLineup(true); // Pass true to indicate it's an edit action
 }
 
-function addPlayerToTeam(player) {
+function addPlayerToTeam(player, positionIdFromBrowser) { // Add positionIdFromBrowser parameter
     const activeSlot = document.querySelector('.empty-slot.active-slot');
     if (!activeSlot) {
         alert("Please click a '+' slot on the pitch or bench to add a player.");
         return;
     }
 
+    if (selectedSquadIds.length >= 15) {
+        alert("Your squad is full (15 players). Please remove a player before adding another.");
+        return;
+    }
+
+    const playerPosition = parseInt(positionIdFromBrowser);
+    const isBeingAddedToBench = activeSlot.parentNode.id.includes('bench');
+
     // Create and add the new player element
     const teamData = allPlayersData.teams.find(t => t.id === player.team_id);
-    const playerWithDetails = { ...player, position: parseInt(player.position_id), team_code: teamData ? teamData.code : null };
-    const newPlayerEl = createPitchPlayerElement(playerWithDetails, !activeSlot.parentNode.id.includes('bench'));
-    activeSlot.parentNode.replaceChild(newPlayerEl, activeSlot);
-
+    const playerWithDetails = { ...player, position: playerPosition, team_code: teamData ? teamData.code : null };
+    const newPlayerEl = createPitchPlayerElement(playerWithDetails, !isBeingAddedToBench);
+    
+    // In Edit Mode, the logic is simpler: place the player in their correct area if there's a slot.
+    const newPlayerTargetAreaId = isBeingAddedToBench ? 'bench-area' : { 1: 'gkp-area', 2: 'def-area', 3: 'mid-area', 4: 'fwd-area' }[playerPosition];
+    const newPlayerTargetArea = document.getElementById(newPlayerTargetAreaId);
+    const targetSlot = newPlayerTargetArea.querySelector('.empty-slot');
+    
+    targetSlot.parentNode.replaceChild(newPlayerEl, targetSlot);
+    
     // Update global state
     selectedSquadIds.push(player.id);
     filterPlayerBrowser(); // Re-filter to disable the newly added player
-    saveSquadToStorage();
-    validateLineup();
+    validateLineup(true); // Pass true to indicate it's an edit action
 }
 
 function highlightEmptySlot(slotElement) {
@@ -345,6 +420,22 @@ function highlightEmptySlot(slotElement) {
     document.querySelectorAll('.empty-slot.active-slot').forEach(s => s.classList.remove('active-slot'));
     // Add active class to the clicked slot
     slotElement.classList.add('active-slot');
+
+    // Only auto-filter the browser for bench slots. For pitch slots, let the user decide.
+    const isBenchSlot = slotElement.parentNode.id === 'bench-area' && isEditMode;
+    if (isBenchSlot) {
+        const positionToFilter = slotElement.dataset.position; // Get position from data-attribute
+
+        // Update the player browser filters
+        const posFilterSelect = document.getElementById('player-browser-pos-filter');
+        const searchInput = document.getElementById('player-browser-search');
+
+        // A position of '0' on a bench slot means show all players.
+        posFilterSelect.value = (positionToFilter && positionToFilter !== '0') ? positionToFilter : 'all';
+        
+        searchInput.value = ''; // Clear search term for better UX
+        filterPlayerBrowser(); // Manually trigger the filter
+    }
 }
 
 function populatePlayerBrowser() {
@@ -362,17 +453,16 @@ function populatePlayerBrowser() {
         item.dataset.playerPosition = Object.keys(allPlayersData.players).find(posId => allPlayersData.players[posId].some(p => p.id === player.id));
         item.dataset.playerPrice = player.price;
         player.position_id = item.dataset.playerPosition; // Store for later
-
         item.innerHTML = `
             <div class="d-flex w-100 justify-content-between">
                 <h6 class="mb-1 small">${player.name} <span class="text-muted">(${player.team})</span></h6>
                 <small class="fw-bold">£${player.price.toFixed(1)}m</small>
             </div>
         `;
-        item.addEventListener('click', (e) => {
+        item.addEventListener('click', (e) => { // Pass position from dataset
             e.preventDefault();
             if (!item.classList.contains('disabled')) {
-                addPlayerToTeam(player);
+                addPlayerToTeam(player, item.dataset.playerPosition);
             }
         });
         browserList.appendChild(item);
@@ -388,7 +478,7 @@ function filterPlayerBrowser() {
 
     document.querySelectorAll('.browser-player-item').forEach(item => {
         const isSelected = selectedSquadIds.includes(parseInt(item.dataset.playerId));
-        const nameMatch = item.dataset.playerName.includes(searchTerm);
+        const nameMatch = searchTerm === '' || item.dataset.playerName.includes(searchTerm); // Fix: empty search term should match all
         const posMatch = posFilter === 'all' || item.dataset.playerPosition === posFilter;
         const priceMatch = parseFloat(item.dataset.playerPrice) <= priceFilter;
 
@@ -397,7 +487,7 @@ function filterPlayerBrowser() {
     });
 }
 
-function validateLineup() {
+function validateLineup(isEditing = false) {
     const starters = document.querySelectorAll('.pitch-player:not(.benched):not(.empty-slot)');
     const totalPlayers = document.querySelectorAll('.pitch-player:not(.empty-slot)');
     const starterCount = starters.length; // Correctly count only players on the pitch
@@ -405,6 +495,7 @@ function validateLineup() {
 
     const analyzeButton = document.getElementById('analyze-button');
 
+    // --- Captaincy ---
     const captainElement = document.querySelector('input[name="captain"]:checked');
     const viceCaptainElement = document.querySelector('input[name="vice_captain"]:checked');
 
@@ -412,7 +503,7 @@ function validateLineup() {
     if (captainElement) localStorage.setItem('fpl_captain', captainElement.value);
     localStorage.setItem('fpl_vice_captain', viceCaptainElement?.value || '');
 
-    // Update budget info in the browser column
+    // --- Budget Info ---
     const allPlayersFlat = [].concat(...Object.values(allPlayersData.players));
     let totalCost = 0;
     selectedSquadIds.forEach(id => {
@@ -430,6 +521,7 @@ function validateLineup() {
         remainingBudgetElement.classList.add('text-success');
     }
 
+    // --- Formation and Error Checking ---
     const posCounts = { 1: 0, 2: 0, 3: 0, 4: 0 };
     starters.forEach(s => {
         posCounts[s.dataset.position]++;        
@@ -438,22 +530,28 @@ function validateLineup() {
     const lineupError = document.getElementById('lineup-error');
     let errorMessage = '';
 
-    // Initial validation for squad size before allowing analysis
-    if (totalPlayers.length !== 15) {
-        analyzeButton.disabled = true;
-        analyzeButton.textContent = `Select ${15 - totalPlayers.length} more players`;
+    if (isEditMode) {
+        // In Edit Mode, we only care about the total number of players
+        analyzeButton.disabled = true; // Analysis is always disabled in edit mode
+        if (totalPlayers.length < 15) {
+            errorMessage = `Select ${15 - totalPlayers.length} more players to complete your squad.`;
+        } else if (totalPlayers.length > 15) {
+            errorMessage = `You have too many players. Please remove ${totalPlayers.length - 15}.`;
+        }
     } else {
-        analyzeButton.textContent = 'Analyze Squad';
-        if (starterCount !== 11) {
-            errorMessage = 'You must select exactly 11 starters.';
+        // In View Mode, we do full validation for analysis
+        if (totalPlayers.length !== 15) {
+            errorMessage = 'Your squad must have 15 players. Please click "Edit Team".';
+        } else if (starterCount !== 11) {
+            errorMessage = 'You must have 11 starters. Please click "Edit Team".';
         } else if (posCounts[1] !== 1) {
-            errorMessage = 'You must have exactly 1 Goalkeeper in your starting XI.';
+            errorMessage = 'You must have exactly 1 Goalkeeper. Please click "Edit Team".';
         } else if (posCounts[2] < 3 || posCounts[2] > 5) {
-            errorMessage = 'You must have 3 to 5 Defenders in your starting XI.';
+            errorMessage = 'You must have 3-5 Defenders. Please click "Edit Team".';
         } else if (posCounts[3] < 2 || posCounts[3] > 5) {
-            errorMessage = 'You must have 2 to 5 Midfielders in your starting XI.';
+            errorMessage = 'You must have 2-5 Midfielders. Please click "Edit Team".';
         } else if (posCounts[4] < 1 || posCounts[4] > 3) {
-            errorMessage = 'You must have 1 to 3 Forwards in your starting XI.';
+            errorMessage = 'You must have 1-3 Forwards. Please click "Edit Team".';
         } else if (!captainElement || !viceCaptainElement) {
             errorMessage = 'You must select a Captain and a Vice-Captain.';
         } else if (captainElement.value === viceCaptainElement.value) {
@@ -461,9 +559,18 @@ function validateLineup() {
         } else if (document.getElementById(`pitch-player-${captainElement.value}`)?.classList.contains('benched') || document.getElementById(`pitch-player-${viceCaptainElement.value}`)?.classList.contains('benched')) {
             errorMessage = 'Captain and Vice-Captain must be in your starting XI.';
         }
-    } // End of totalPlayers.length === 15 check
+    }
 
-    // Update captaincy UI
+    // --- UI Updates ---
+    if (errorMessage) {
+        analyzeButton.disabled = true;
+        lineupError.textContent = errorMessage;
+        lineupError.classList.remove('d-none');
+    } else {
+        analyzeButton.disabled = isEditMode; // Button is only enabled if not in edit mode and no errors
+        lineupError.classList.add('d-none');
+    }
+
     document.querySelectorAll('.captaincy-badge').forEach(b => b.style.display = 'none');
     document.querySelectorAll('.captaincy-controls').forEach(c => c.style.display = 'none');
     starters.forEach(s => {
@@ -483,23 +590,13 @@ function validateLineup() {
         if(badge) { badge.textContent = 'V'; badge.style.display = 'flex'; }
     }
 
-    if (errorMessage) {
-        lineupError.textContent = errorMessage;
-        lineupError.classList.remove('d-none');
-        analyzeButton.disabled = true;
-    } else {
-        lineupError.classList.add('d-none');
-        // Only enable if 15 players are selected AND lineup is valid
-        analyzeButton.disabled = (totalPlayers.length !== 15);
-    }
-    
     // Add event listeners to new radio buttons
-    document.querySelectorAll('.captaincy-radio').forEach(rb => rb.addEventListener('change', validateLineup));
+    document.querySelectorAll('.captaincy-radio').forEach(rb => rb.addEventListener('change', () => validateLineup(isEditing)));
 }
 
 
 async function analyzeTeam() {
-    const startingPlayerElements = document.querySelectorAll('.pitch-player:not(.benched)');
+    const startingPlayerElements = document.querySelectorAll('.pitch-player:not(.benched):not(.empty-slot)');
     const benchPlayerElements = document.querySelectorAll('.pitch-player.benched');
     const captainId = document.querySelector('input[name="captain"]:checked')?.value;
     const viceCaptainId = document.querySelector('input[name="vice_captain"]:checked')?.value;

@@ -419,6 +419,13 @@ h6 {
     cursor: pointer;
 }
 
+.pitch-player.locked {
+    cursor: not-allowed;
+}
+.pitch-player.locked:hover .remove-player-btn,
+.pitch-player.locked:hover .player-action-button {
+    display: none !important;
+}
 .pitch-player .player-kit {
     position: relative;
     width: 40px;
@@ -551,6 +558,19 @@ h6 {
 .pitch-player .add-to-pitch-btn { color: var(--alert-success); }
 
 /* Hide the irrelevant button on hover */
+.pitch-player:not(.benched):hover .add-to-pitch-btn {
+    display: none;
+}
+
+.pitch-player.benched:hover .remove-from-pitch-btn {
+    display: none;
+}
+
+/* Ensure the correct button shows on hover */
+.pitch-player.benched:hover .add-to-pitch-btn {
+    display: flex;
+}
+
 .pitch-player.benched .player-name-plate {
     background-color: var(--neutral-500);
 }
