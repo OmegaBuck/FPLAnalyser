@@ -1,0 +1,5 @@
+Flask
+requests
+thefuzz[speedup]
+python-Levenshtein
+python-dotenv

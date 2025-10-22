@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FPL Team Analyzer</title> 
+    <link href="https://fonts.cdnfonts.com/css/abcsans" rel="stylesheet"> <!-- ABC Sans font import -->
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+    <!-- Custom CSS to override Bootstrap styles -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="nav ps-2 pe-2">
+                <div class="w-100 h-100 mb-4 d-flex justify-content-between align-items-center">
+            <div class="h-100 d-flex flex-column align-items-start justify-content-center">
+            <h1 class="display-5 fw-bold p-0 m-0">FPL Squad Analyzer</h1>
+            <p class="lead p-0 m-0">Build your squad on the pitch, get a rating, and see top transfer suggestions.</p>
+          </div>
+            <button type="button" id="analyze-button" class="btn btn-fpl mt-3" disabled>Analyze Squad</button>
+        </div>
+    </div>
+    <div class="container my-0">
+
+
+        <!-- New Two-Column Layout for Analysis View -->
+        <div class="row g-4" id="analysis-view-container"> 
+            <!-- Left Column (Pitch) -->
+            <div class="col-lg-5" id="pitch-column">
+                <div id="lineup-setter">
+                    <!-- Loading state for pitch view -->
+                    <div id="pitch-loading" class="text-center py-5">
+                        <div class="spinner-border text-secondary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="mt-2">Loading FPL data...</p>
+                    </div>
+                    <h5 class="mb-3 text-center">Set Your Starting XI (<span id="starter-count">0</span>/11)</h5>
+                    <div id="lineup-pitch-container" class="mb-3">
+                        <div class="pitch">
+                            <!-- Pitch Markings -->
+                            <div class="pitch-line" id="penalty-box"></div>
+                            <div class="pitch-line" id="goal-area"></div>
+                            <div class="pitch-line" id="center-line"></div>
+                            <div class="pitch-line" id="center-circle"></div>
+                            <div class="pitch-area" id="gkp-area"></div>
+                            <div class="pitch-area" id="def-area"></div>
+                            <div class="pitch-area" id="mid-area"></div>
+                            <div class="pitch-area" id="fwd-area"></div>
+                        </div>
+                        <div class="bench" id="bench-area"></div>
+                    </div>
+                    <div id="lineup-error" class="alert alert-warning d-none" role="alert"></div>
+                    <button type="button" id="analyze-button" class="btn btn-fpl w-100 mt-3" disabled>Analyze Squad</button>
+                </div>
+            </div>
+
+            <!-- Middle Column (Browser) -->
+            <div class="col-lg-3" id="browser-column">
+                <!-- Game Settings Card -->
+                <div class="card shadow-sm mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">Game Settings</h5>
+                    </div>
+                    <div class="card-body d-flex justify-content-around">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" role="switch" id="bench-boost-used">
+                            <label class="form-check-label" for="bench-boost-used">Bench Boost Used</label>
+                        </div>
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" role="switch" id="triple-captain-used">
+                            <label class="form-check-label" for="triple-captain-used">Triple Captain Used</label>
+                        </div>
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" role="switch" id="wildcard-used">
+                            <label class="form-check-label" for="wildcard-used">Wildcard Used</label>
+                        </div>
+                    </div>
+                </div>
+                <!-- Player Browser Card -->
+                <div class="card shadow-sm">
+                    <div class="card-header">
+                        <h5 class="mb-0">Player Browser</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="browser-budget-info" class="d-flex justify-content-between align-items-center small mb-3">
+                            <span>Cost: <span id="browser-total-cost">£0.0</span>m</span>
+                            <span>Remaining: <span id="browser-remaining-budget" class="fw-bold">£100.0</span>m</span>
+                        </div>
+                        <input type="text" id="player-browser-search" class="form-control mb-2" placeholder="Search player name...">
+                        <div class="d-flex gap-2 mb-3">
+                            <select id="player-browser-pos-filter" class="form-select form-select-sm">
+                                <option value="all">All Positions</option>
+                                <option value="1">Goalkeepers</option>
+                                <option value="2">Defenders</option>
+                                <option value="3">Midfielders</option>
+                                <option value="4">Forwards</option>
+                            </select>
+                            <input type="number" id="player-browser-price-filter" class="form-control form-control-sm" placeholder="Max Price" step="0.1">
+                        </div>
+                        <div id="player-browser-list" class="list-group"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column (Analysis) -->
+            <div class="col-lg-4 mt-0 pt-0" id="analysis-column">
+                <div id="loading" class="text-center py-5 d-none mt-4">
+                    <div class="spinner-border text-success" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2">Analyzing your team... This might take a moment.</p>
+                </div>
+
+                <div id="results" class="d-none">
+                    <h3 class="mt-4 mb-3">Assistant Manager</h3>
+                    <div class="card text-center text-white bg-fpl-dark mb-3 chat-bubble assistant">
+                        <div class="card-header">Your Team Rating</div>
+                        <div class="card-body">
+                            <h3 class="display-4 fw-bold" id="team-rating">--</h3>
+                        </div>
+                    </div>
+
+                    <div id="chip-suggestions-section" class="d-none mb-3">
+                        <h5 class="text-muted small text-center mb-2">Chip Strategy</h5>
+                        <div id="chip-suggestions-container" class="list-group"></div>
+                    </div>
+                </div>
+
+                <div id="transfer-suggestions-section" class="d-none">
+                    <h3 class="mb-3">Top Transfer Suggestion</h3>
+                    <p class="text-muted small">This is the most valuable transfer you can make for the upcoming gameweek based on your current squad and budget.</p>
+                    <div id="free-transfers-container" class="mb-4"></div>
+
+                    <h3 class="mb-3">Other Potential Suggestions</h3>
+                    <p class="text-muted small">These are other possible upgrades for your squad that provide a smaller point gain.</p>
+                    <div id="other-suggestions-container" class="mb-4"></div>
+                </div>
+
+                <div id="suggested-lineups-section" class="d-none">
+                    <h3 class="mb-3">Suggested Lineups</h3>
+                    <ul class="nav nav-tabs" id="lineupTabs" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" id="free-transfers-tab" data-bs-toggle="tab" data-bs-target="#free-transfers-lineup" type="button" role="tab" aria-controls="free-transfers-lineup" aria-selected="true">After Free Transfers</button>
+                        </li>
+                        <li class="nav-item" id="wildcard-tab-item" role="presentation" style="display: none;">
+                            <button class="nav-link" id="wildcard-tab" data-bs-toggle="tab" data-bs-target="#wildcard-lineup" type="button" role="tab" aria-controls="wildcard-lineup" aria-selected="false">Optimal Wildcard Squad</button>
+                        </li>
+                    </ul>
+                    <div class="tab-content" id="lineupTabsContent">
+                        <div class="tab-pane fade show active" id="free-transfers-lineup" role="tabpanel" aria-labelledby="free-transfers-tab">
+                            <p class="text-muted small p-3 mb-0 bg-light border border-top-0">This is the optimal lineup for the next gameweek if you make the suggested free transfers.</p>
+                            <div class="card mb-4 border-top-0 rounded-0">
+                                <div class="card-body p-0">
+                                    <table class="table table-striped mb-0" id="suggested-lineup-table-ft">
+                                        <thead><tr><th>Role</th><th>Name</th><th>Form</th><th>Price</th><th>Total Points</th></tr></thead>
+                                        <tbody></tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="tab-pane fade" id="wildcard-lineup" role="tabpanel" aria-labelledby="wildcard-tab">
+                            <p class="text-muted small p-3 mb-0 bg-light border border-top-0">If a Wildcard is recommended, this is the highest-value squad you could build within the £100m budget.</p>
+                            <div class="card mb-4 border-top-0 rounded-0">
+                                <div class="card-body p-0">
+                                    <table class="table table-striped mb-0" id="suggested-lineup-table-wc">
+                                        <thead><tr><th>Role</th><th>Name</th><th>Form</th><th>Price</th><th>Total Points</th></tr></thead>
+                                        <tbody></tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="gameweek-fixtures-section" class="d-none">
+                    <h3 class="mb-3">Upcoming Gameweek Fixtures</h3>
+                    <div id="fixtures-container" class="row g-3"></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="error-container" class="mt-4 d-none">
+            <div id="error" class="alert alert-danger d-none" role="alert"></div>
+        </div>
+    </div>
+
+    <!-- Template for empty player slot -->
+    <template id="empty-slot-template">
+        <div class="pitch-player empty-slot">
+            <div class="player-kit">
+                <div class="empty-shirt">+</div>
+            </div>
+        </div>
+    </template>
+    <!-- Bootstrap 5 JS Bundle -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
