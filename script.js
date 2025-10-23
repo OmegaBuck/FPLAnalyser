@@ -4,7 +4,8 @@ let selectedSquadIds = [];
 let usedChips = {
     benchBoost: false,
     tripleCaptain: false,
-    wildcard: false
+    wildcard: false,
+    freeHit: false
 };
 let isEditMode = false;
 
@@ -12,8 +13,6 @@ document.addEventListener('DOMContentLoaded', () => {
     loadAllPlayers();
     // The 'Analyze Squad' button listener is now the primary action
     document.getElementById('analyze-button').addEventListener('click', analyzeTeam);
-    // New listener for the Edit/Save button
-    document.getElementById('edit-save-button').addEventListener('click', toggleEditMode);
     
     setupChipEventListeners();
 
@@ -29,11 +28,11 @@ function toggleEditMode() {
     isEditMode = !isEditMode;
     const button = document.getElementById('edit-save-button');
     if (isEditMode) {
-        button.textContent = 'Save Team';
+        button.innerHTML = '<i class="fas fa-save"></i> Save Team';
         button.classList.remove('btn-secondary');
         button.classList.add('btn-success');
     } else {
-        button.textContent = 'Edit Team';
+        button.innerHTML = '<i class="fas fa-edit"></i> Edit Team';
         button.classList.remove('btn-success');
         button.classList.add('btn-secondary');
         // When saving, we also save the current starter/bench state
@@ -56,6 +55,10 @@ function setupChipEventListeners() {
         usedChips.wildcard = e.target.checked;
         saveChipStatusToStorage();
     });
+    document.getElementById('free-hit-used').addEventListener('change', (e) => {
+        usedChips.freeHit = e.target.checked;
+        saveChipStatusToStorage();
+    });
 }
 
 async function loadAllPlayers() {
@@ -73,6 +76,10 @@ async function loadAllPlayers() {
         // Hide loading spinner and show the pitch/browser view
         pitchLoading.classList.add('d-none');
         lineupSetter.style.opacity = 1;
+
+        // Set up interactive buttons now that the main view is ready
+        document.getElementById('edit-save-button').addEventListener('click', toggleEditMode);
+        
 
         // Load a saved squad from storage, if it exists
         loadSquadFromStorage();
@@ -147,17 +154,36 @@ function loadChipStatusFromStorage() {
     document.getElementById('bench-boost-used').checked = usedChips.benchBoost;
     document.getElementById('triple-captain-used').checked = usedChips.tripleCaptain;
     document.getElementById('wildcard-used').checked = usedChips.wildcard;
+    document.getElementById('free-hit-used').checked = usedChips.freeHit;
 }
 
 function initializePitchView() {
     const savedState = JSON.parse(localStorage.getItem('fpl_squad_state') || '{}');
     let layout;
+    const allPlayersFlat = [].concat(...Object.values(allPlayersData.players));
 
     if (isEditMode) {
         // In Edit Mode, show max slots for flexibility
         layout = {
             'gkp-area': 2, 'def-area': 5, 'mid-area': 5, 'fwd-area': 3,
             'bench-area': 4
+        };
+    } else if (savedState.starterIds && savedState.starterIds.length === 11) {
+        // In View Mode, dynamically create the layout based on the saved formation.
+        const posCounts = { 1: 0, 2: 0, 3: 0, 4: 0 };
+        savedState.starterIds.forEach(id => {
+            const player = allPlayersFlat.find(p => p.id === id);
+            if (player) {
+                const position = Object.keys(allPlayersData.players).find(posId => allPlayersData.players[posId].some(p => p.id === id));
+                if (position) posCounts[position]++;
+            }
+        });
+        layout = {
+            'gkp-area': posCounts[1],
+            'def-area': posCounts[2],
+            'mid-area': posCounts[3],
+            'fwd-area': posCounts[4],
+            'bench-area': 4 // Bench always has 4 slots
         };
     } else {
         // In View Mode, show a standard 4-4-2 layout for empty slots
@@ -172,7 +198,6 @@ function initializePitchView() {
     // Get all selected player objects
     let selectedPlayers = [];
     if (selectedSquadIds.length > 0) {
-        const allPlayersFlat = [].concat(...Object.values(allPlayersData.players));
         selectedPlayers = selectedSquadIds.map(id => {
             const player = allPlayersFlat.find(p => p.id === id);
             if (!player) return null;
@@ -189,12 +214,14 @@ function initializePitchView() {
     
     // Determine starters
     let starterIds = new Set();
-    if (!isEditMode && savedState.starterIds && savedState.starterIds.length === 11) {
+    // When entering Edit Mode OR in View mode, always respect the saved starters.
+    // This ensures consistency when toggling between modes.
+    if (savedState.starterIds && savedState.starterIds.length > 0) {
         // If in View mode and we have saved starters, use them
         starterIds = new Set(savedState.starterIds);
     } else {
-        // In Edit mode, or if no saved starters, all players are initially placed on the pitch by position
-        // until the pitch is full (11 players), then they go to the bench.
+        // Fallback for initial load with no saved state:
+        // Place first 11 players on the pitch, rest on bench.
         const pitchPlayers = selectedPlayers.slice(0, 11);
         starterIds = new Set(pitchPlayers.map(p => p.id));
     }

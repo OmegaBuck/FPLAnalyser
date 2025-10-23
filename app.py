@@ -205,6 +205,14 @@ def suggest_chips(starting_players_with_difficulty, bench_players_with_difficult
             'reason': f"We've identified **{len(other_suggestions) + 1} potential upgrades** for your team. This might be a good time to use your Wildcard for a major overhaul."
         })
         
+    # 4. Free Hit Suggestion
+    # Suggest if there's a significant score difference between starters and potential replacements
+    # This is a simple heuristic; a more complex one could look at DGWs, etc.
+    if not used_chips.get('freeHit') and other_suggestions and other_suggestions[0].get('score_gain', 0) > 3.0:
+        chip_suggestions.append({
+            'chip': 'Free Hit',
+            'reason': "There are significant one-week gains available. A Free Hit could maximize your points for this gameweek."
+        })
     return chip_suggestions
 
 def suggest_wildcard_team(all_elements, all_teams, all_fixtures, next_gameweek_id):
